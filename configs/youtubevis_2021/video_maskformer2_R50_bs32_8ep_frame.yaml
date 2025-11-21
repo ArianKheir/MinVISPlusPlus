@@ -1,6 +1,6 @@
 _BASE_: Base-YouTubeVIS-VideoInstanceSegmentation.yaml
 MODEL:
-  WEIGHTS: "model_final_3c8ec9.pkl"
+  WEIGHTS: "/data/Arian/minvis_res50/model_final_3c8ec9.pkl"
   META_ARCHITECTURE: "VideoMaskFormer_frame"
   SEM_SEG_HEAD:
     NAME: "MaskFormerHead"
@@ -24,6 +24,7 @@ MODEL:
     CLASS_WEIGHT: 2.0
     MASK_WEIGHT: 5.0
     DICE_WEIGHT: 5.0
+    CENTER_WEIGHT: 0.1
     HIDDEN_DIM: 256
     NUM_OBJECT_QUERIES: 100
     NHEADS: 8
