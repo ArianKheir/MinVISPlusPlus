@@ -17,7 +17,7 @@ try:
     warnings.filterwarnings('ignore', category=ShapelyDeprecationWarning)
 except:
     pass
-
+import warnings
 import copy
 import itertools
 import logging
@@ -228,7 +228,7 @@ class Trainer(DefaultTrainer):
                     )
                     results[dataset_name] = {}
                     continue
-            with autocast():
+            with torch.amp.autocast('cuda', enabled=False):
                 results_i = inference_on_dataset(model, data_loader, evaluator)
             results[dataset_name] = results_i
             if comm.is_main_process():
@@ -286,6 +286,7 @@ def main(args):
 
 
 if __name__ == "__main__":
+    warnings.filterwarnings("ignore", category=FutureWarning, message=r".torch.cuda.amp.autocast.")
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
     launch(
