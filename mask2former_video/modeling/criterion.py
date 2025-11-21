@@ -184,7 +184,18 @@ class VideoSetCriterion(nn.Module):
         del src_masks
         del target_masks
         return losses
-
+    def loss_centers(self, outputs, targets, indices, num_masks):
+        assert "pred_centers" in outputs
+        pred = outputs["pred_centers"] #[B, Q, T, 2]
+        batch_idx, src_idx = self._get_src_permutation_idx(indices)
+        if batch_idx.numel() == 0:
+            return {"loss_center": pred.sum() * 0.0}
+        src_centers = pred[batch_idx, src_idx]
+        tgt_centers = torch.cat([t["centers"][J] for t, (_, J) in zip(targets, indices)], dim=0).to(src_centers)
+        per_item = F.l1_loss(src_centers, tgt_centers, reduction="none").sum(-1).mean(-1)
+        loss_center = per_item.sum() / max(num_masks, 1.0)
+        losses = {"loss_center": loss_center}
+        return losses
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -201,6 +212,7 @@ class VideoSetCriterion(nn.Module):
         loss_map = {
             'labels': self.loss_labels,
             'masks': self.loss_masks,
+            'center': self.loss_centers,
         }
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)

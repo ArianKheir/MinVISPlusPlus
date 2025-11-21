@@ -18,7 +18,6 @@ from mask2former.modeling.transformer_decoder.position_encoding import PositionE
 from mask2former_video.modeling.transformer_decoder.video_mask2former_transformer_decoder import VideoMultiScaleMaskedTransformerDecoder
 import einops
 
-
 @TRANSFORMER_DECODER_REGISTRY.register()
 class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransformerDecoder):
 
@@ -58,7 +57,8 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         # use 2D positional embedding
         N_steps = hidden_dim // 2
         self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
-
+        ##Adding the linear NN for predicting bbox centers
+        self.center_embed = nn.Linear(hidden_dim, 2)
     def forward(self, x, mask_features, mask = None):
         # x is a list of multi-scale feature
         assert len(x) == self.num_feature_levels
@@ -86,11 +86,13 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
 
         predictions_class = []
         predictions_mask = []
+        predictions_center = []
 
         # prediction heads on learnable query features
-        outputs_class, outputs_mask, attn_mask = self.forward_prediction_heads(output, mask_features, attn_mask_target_size=size_list[0])
+        outputs_class, outputs_mask, attn_mask, output_center = self.forward_prediction_heads(output, mask_features, attn_mask_target_size=size_list[0])
         predictions_class.append(outputs_class)
         predictions_mask.append(outputs_mask)
+        predictions_center.append(output_center)
 
         for i in range(self.num_layers):
             level_index = i % self.num_feature_levels
@@ -114,12 +116,14 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
                 output
             )
 
-            outputs_class, outputs_mask, attn_mask = self.forward_prediction_heads(output, mask_features, attn_mask_target_size=size_list[(i + 1) % self.num_feature_levels])
+            outputs_class, outputs_mask, attn_mask, output_center = self.forward_prediction_heads(output, mask_features, attn_mask_target_size=size_list[(i + 1) % self.num_feature_levels])
             predictions_class.append(outputs_class)
             predictions_mask.append(outputs_mask)
+            predictions_center.append(output_center)
 
         assert len(predictions_class) == self.num_layers + 1
 
+        assert len(predictions_center) == len(predictions_mask)
         # expand BT to B, T  
         bt = predictions_mask[-1].shape[0]
         bs = bt // self.num_frames if self.training else 1
@@ -129,17 +133,22 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
 
         for i in range(len(predictions_class)):
             predictions_class[i] = einops.rearrange(predictions_class[i], '(b t) q c -> b t q c', t=t)
-
+        
+        for i in range(len(predictions_center)):
+            predictions_center[i] = einops.rearrange(predictions_center[i], '(b t) q c-> b q t c', t=t)
+        
         pred_embds = self.decoder_norm(output)
         pred_embds = einops.rearrange(pred_embds, 'q (b t) c -> b c t q', t=t)
 
         out = {
             'pred_logits': predictions_class[-1],
             'pred_masks': predictions_mask[-1],
+            #added the centers here for loss
             'aux_outputs': self._set_aux_loss(
-                predictions_class if self.mask_classification else None, predictions_mask
+                predictions_class if self.mask_classification else None, predictions_mask, predictions_center
             ),
             'pred_embds': pred_embds,
+            'pred_centers': predictions_center[-1]
         }
         
         return out
@@ -149,6 +158,8 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         decoder_output = decoder_output.transpose(0, 1)
         outputs_class = self.class_embed(decoder_output)
         mask_embed = self.mask_embed(decoder_output)
+        ##Adding bbox centers prediction-head in forward
+        output_center = self.center_embed(decoder_output)
         outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
 
         # NOTE: prediction is of higher-resolution
@@ -159,4 +170,17 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         attn_mask = (attn_mask.sigmoid().flatten(2).unsqueeze(1).repeat(1, self.num_heads, 1, 1).flatten(0, 1) < 0.5).bool()
         attn_mask = attn_mask.detach()
 
-        return outputs_class, outputs_mask, attn_mask
+        return outputs_class, outputs_mask, attn_mask, output_center
+    @torch.jit.unused
+    def _set_aux_loss(self, outputs_class, outputs_seg_masks, outputs_centers):
+        # keep TorchScript-friendly homogeneous dicts per layer
+        if self.mask_classification:
+            return [
+                {"pred_logits": a, "pred_masks": b, "pred_centers": c}
+                for a, b, c in zip(outputs_class[:-1], outputs_seg_masks[:-1], outputs_centers[:-1])
+            ]
+        else:
+            return [
+                {"pred_masks": b, "pred_centers": c}
+                for b, c in zip(outputs_seg_masks[:-1], outputs_centers[:-1])
+            ]

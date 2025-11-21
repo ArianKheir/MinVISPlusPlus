@@ -111,7 +111,7 @@ class VideoMaskFormer_frame(nn.Module):
         class_weight = cfg.MODEL.MASK_FORMER.CLASS_WEIGHT
         dice_weight = cfg.MODEL.MASK_FORMER.DICE_WEIGHT
         mask_weight = cfg.MODEL.MASK_FORMER.MASK_WEIGHT
-
+        center_weight = cfg.MODEL.MASK_FORMER.CENTER_WEIGHT
         # building criterion
         matcher = VideoHungarianMatcher(
             cost_class=class_weight,
@@ -120,7 +120,7 @@ class VideoMaskFormer_frame(nn.Module):
             num_points=cfg.MODEL.MASK_FORMER.TRAIN_NUM_POINTS,
         )
 
-        weight_dict = {"loss_ce": class_weight, "loss_mask": mask_weight, "loss_dice": dice_weight}
+        weight_dict = {"loss_ce": class_weight, "loss_mask": mask_weight, "loss_dice": dice_weight, "loss_center": center_weight}
 
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
@@ -129,7 +129,7 @@ class VideoMaskFormer_frame(nn.Module):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
 
-        losses = ["labels", "masks"]
+        losses = ["labels", "masks", "center"]
 
         criterion = VideoSetCriterion(
             sem_seg_head.num_classes,
@@ -239,6 +239,9 @@ class VideoMaskFormer_frame(nn.Module):
     def frame_decoder_loss_reshape(self, outputs, targets):
         outputs['pred_masks'] = einops.rearrange(outputs['pred_masks'], 'b q t h w -> (b t) q () h w')
         outputs['pred_logits'] = einops.rearrange(outputs['pred_logits'], 'b t q c -> (b t) q c')
+        #Rearranging for Added Centers
+        if 'pred_centers' in outputs:
+            outputs['pred_centers'] = einops.rearrange(outputs['pred_centers'], 'b q t c -> (b t) q c')
         if 'aux_outputs' in outputs:
             for i in range(len(outputs['aux_outputs'])):
                 outputs['aux_outputs'][i]['pred_masks'] = einops.rearrange(
@@ -247,6 +250,11 @@ class VideoMaskFormer_frame(nn.Module):
                 outputs['aux_outputs'][i]['pred_logits'] = einops.rearrange(
                     outputs['aux_outputs'][i]['pred_logits'], 'b t q c -> (b t) q c'
                 )
+                #Rearranging for Added Centers in aux_outputs
+                if 'pred_centers' in outputs['aux_outputs'][i]:
+                    outputs['aux_outputs'][i]['pred_centers'] = einops.rearrange(
+                        outputs['aux_outputs'][i]['pred_centers'], 'b q t c -> (b t) q c'
+                    )
 
         gt_instances = []
         for targets_per_video in targets:
@@ -258,8 +266,12 @@ class VideoMaskFormer_frame(nn.Module):
                 labels = targets_per_video['labels']
                 ids = targets_per_video['ids'][:, [f]]
                 masks = targets_per_video['masks'][:, [f], :, :]
-                gt_instances.append({"labels": labels, "ids": ids, "masks": masks})
-
+                #setting Targets for Centers
+                if 'centers' in targets_per_video:
+                    centers = targets_per_video['centers'][:, f, :]
+                    gt_instances.append({"labels": labels, "ids": ids, "masks": masks, "centers": centers})
+                else:
+                    gt_instances.append({"labels": labels, "ids": ids, "masks": masks})
         return outputs, gt_instances
 
     def match_from_embds(self, tgt_embds, cur_embds):
@@ -347,14 +359,17 @@ class VideoMaskFormer_frame(nn.Module):
             _num_instance = len(targets_per_video["instances"][0])
             mask_shape = [_num_instance, self.num_frames, h_pad, w_pad]
             gt_masks_per_video = torch.zeros(mask_shape, dtype=torch.bool, device=self.device)
+            gt_centers_per_video = torch.zeros((_num_instance, self.num_frames, 2), dtype=torch.float32, device=self.device)
 
             gt_ids_per_video = []
             for f_i, targets_per_frame in enumerate(targets_per_video["instances"]):
                 targets_per_frame = targets_per_frame.to(self.device)
                 h, w = targets_per_frame.image_size
-
                 gt_ids_per_video.append(targets_per_frame.gt_ids[:, None])
                 gt_masks_per_video[:, f_i, :h, :w] = targets_per_frame.gt_masks.tensor
+                #Adding the Gt centers
+                centers = targets_per_frame.gt_centers 
+                gt_centers_per_video[:, f_i] = centers
 
             gt_ids_per_video = torch.cat(gt_ids_per_video, dim=1)
             valid_idx = (gt_ids_per_video != -1).any(dim=-1)
@@ -365,6 +380,10 @@ class VideoMaskFormer_frame(nn.Module):
             gt_instances.append({"labels": gt_classes_per_video, "ids": gt_ids_per_video})
             gt_masks_per_video = gt_masks_per_video[valid_idx].float()          # N, num_frames, H, W
             gt_instances[-1].update({"masks": gt_masks_per_video})
+
+            #Adding the Gt centers
+            gt_centers_per_video = gt_centers_per_video[valid_idx]
+            gt_instances[-1].update({"centers": gt_centers_per_video})
 
         return gt_instances
 
