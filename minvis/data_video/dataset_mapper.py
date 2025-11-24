@@ -298,7 +298,10 @@ class YTVISDatasetMapper:
                 instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
                 #Adding the bbox centers to the DataSetMapper
                 centers = instances.gt_boxes.get_centers().to(torch.float32)
-                instances.set("gt_centers", centers)
+                #normalized centers
+                h, w = image_shape
+                normalized_centers = centers / torch.tensor([w, h], dtype=torch.float32, device=centers.device)
+                instances.set("gt_centers", normalized_centers)
                 instances = filter_empty_instances(instances)
             else:
                 instances.gt_masks = BitMasks(torch.empty((0, *image_shape)))

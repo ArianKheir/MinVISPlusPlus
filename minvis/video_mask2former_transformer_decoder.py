@@ -15,7 +15,7 @@ from detectron2.config import configurable
 from mask2former.modeling.transformer_decoder.maskformer_transformer_decoder import TRANSFORMER_DECODER_REGISTRY
 from mask2former.modeling.transformer_decoder.position_encoding import PositionEmbeddingSine
 
-from mask2former_video.modeling.transformer_decoder.video_mask2former_transformer_decoder import VideoMultiScaleMaskedTransformerDecoder
+from mask2former_video.modeling.transformer_decoder.video_mask2former_transformer_decoder import VideoMultiScaleMaskedTransformerDecoder, MLP
 import einops
 
 @TRANSFORMER_DECODER_REGISTRY.register()
@@ -58,7 +58,7 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         N_steps = hidden_dim // 2
         self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
         ##Adding the linear NN for predicting bbox centers
-        self.center_embed = nn.Linear(hidden_dim, 2)
+        self.center_embed = MLP(hidden_dim, hidden_dim, 2, 3)
     def forward(self, x, mask_features, mask = None):
         # x is a list of multi-scale feature
         assert len(x) == self.num_feature_levels
@@ -158,8 +158,8 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         decoder_output = decoder_output.transpose(0, 1)
         outputs_class = self.class_embed(decoder_output)
         mask_embed = self.mask_embed(decoder_output)
-        ##Adding bbox centers prediction-head in forward
-        output_center = self.center_embed(decoder_output)
+        ##Adding bbox centers prediction-head in forward(AAded sigmoid for normalization)
+        output_center = torch.sigmoid(self.center_embed(decoder_output))
         outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
 
         # NOTE: prediction is of higher-resolution
