@@ -204,7 +204,7 @@ class VideoSetCriterion(nn.Module):
         tgt_centers = torch.cat([t["features"][J] for t, (_, J) in zip(targets, indices)], dim=0).to(src_feats)
         per_item_loss = F.mse_loss(src_feats, tgt_centers, reduction="none").sum(-1).mean(-1)
         loss_feat = per_item_loss.sum() / max(num_masks, 1.0)
-        losses = {"loss_feat": loss_feat}
+        losses = {"loss_features": loss_feat}
         return losses
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
