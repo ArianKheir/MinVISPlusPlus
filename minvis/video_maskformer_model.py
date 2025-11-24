@@ -112,6 +112,7 @@ class VideoMaskFormer_frame(nn.Module):
         dice_weight = cfg.MODEL.MASK_FORMER.DICE_WEIGHT
         mask_weight = cfg.MODEL.MASK_FORMER.MASK_WEIGHT
         center_weight = cfg.MODEL.MASK_FORMER.CENTER_WEIGHT
+        features_weight = cfg.MODEL.MASK_FORMER.FEATURES_WEIGHT
         # building criterion
         matcher = VideoHungarianMatcher(
             cost_class=class_weight,
@@ -120,7 +121,7 @@ class VideoMaskFormer_frame(nn.Module):
             num_points=cfg.MODEL.MASK_FORMER.TRAIN_NUM_POINTS,
         )
 
-        weight_dict = {"loss_ce": class_weight, "loss_mask": mask_weight, "loss_dice": dice_weight, "loss_center": center_weight}
+        weight_dict = {"loss_ce": class_weight, "loss_mask": mask_weight, "loss_dice": dice_weight, "loss_center": center_weight, "loss_features" : features_weight}
 
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
@@ -129,7 +130,7 @@ class VideoMaskFormer_frame(nn.Module):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
 
-        losses = ["labels", "masks", "center"]
+        losses = ["labels", "masks", "center", "features"]
 
         criterion = VideoSetCriterion(
             sem_seg_head.num_classes,
@@ -204,7 +205,8 @@ class VideoMaskFormer_frame(nn.Module):
 
         if self.training:
             # mask classification target
-            targets = self.prepare_targets(batched_inputs, images)
+            #Added features to the target
+            targets = self.prepare_targets(batched_inputs, images, features)
 
             outputs, targets = self.frame_decoder_loss_reshape(outputs, targets)
 
@@ -242,6 +244,8 @@ class VideoMaskFormer_frame(nn.Module):
         #Rearranging for Added Centers
         if 'pred_centers' in outputs:
             outputs['pred_centers'] = einops.rearrange(outputs['pred_centers'], 'b q t c -> (b t) q c')
+        if 'pred_feats' in outputs:
+            outputs['pred_feats'] = einops.rearrange(outputs['pred_feats'], 'b q t c -> (b t) q c')
         if 'aux_outputs' in outputs:
             for i in range(len(outputs['aux_outputs'])):
                 outputs['aux_outputs'][i]['pred_masks'] = einops.rearrange(
@@ -255,6 +259,10 @@ class VideoMaskFormer_frame(nn.Module):
                     outputs['aux_outputs'][i]['pred_centers'] = einops.rearrange(
                         outputs['aux_outputs'][i]['pred_centers'], 'b q t c -> (b t) q c'
                     )
+                if 'pred_feats' in outputs['aux_outputs'][i]:
+                    outputs['aux_outputs'][i]['pred_feats'] = einops.rearrange(
+                        outputs['aux_outputs'][i]['pred_feats'], 'b q t c -> (b t) q c'
+                    )                
 
         gt_instances = []
         for targets_per_video in targets:
@@ -267,11 +275,13 @@ class VideoMaskFormer_frame(nn.Module):
                 ids = targets_per_video['ids'][:, [f]]
                 masks = targets_per_video['masks'][:, [f], :, :]
                 #setting Targets for Centers
-                if 'centers' in targets_per_video:
+                if ('centers' in targets_per_video) and ('features' in targets_per_video):
                     centers = targets_per_video['centers'][:, f, :]
-                    gt_instances.append({"labels": labels, "ids": ids, "masks": masks, "centers": centers})
+                    features = targets_per_video['features'][:, f, :]
+                    gt_instances.append({"labels": labels, "ids": ids, "masks": masks, "centers": centers, "features":features})
                 else:
                     gt_instances.append({"labels": labels, "ids": ids, "masks": masks})
+
         return outputs, gt_instances
 
     def match_from_embds(self, tgt_embds, cur_embds):
@@ -352,14 +362,21 @@ class VideoMaskFormer_frame(nn.Module):
 
         return outputs
 
-    def prepare_targets(self, targets, images):
+    def prepare_targets(self, targets, images, features):
         h_pad, w_pad = images.tensor.shape[-2:]
         gt_instances = []
         for targets_per_video in targets:
             _num_instance = len(targets_per_video["instances"][0])
             mask_shape = [_num_instance, self.num_frames, h_pad, w_pad]
             gt_masks_per_video = torch.zeros(mask_shape, dtype=torch.bool, device=self.device)
+            #Adding the Gt centers
             gt_centers_per_video = torch.zeros((_num_instance, self.num_frames, 2), dtype=torch.float32, device=self.device)
+            #Calculating the total feautre channles for features dim
+            features_dim = 0
+            for key in features.keys():
+                features_dim += features[key].shape[1]
+            #Adding the Gt features
+            gt_features_per_video = torch.zeros((_num_instance, self.num_frames, features_dim), dtype=torch.bool, device=self.device)
 
             gt_ids_per_video = []
             for f_i, targets_per_frame in enumerate(targets_per_video["instances"]):
@@ -367,6 +384,30 @@ class VideoMaskFormer_frame(nn.Module):
                 h, w = targets_per_frame.image_size
                 gt_ids_per_video.append(targets_per_frame.gt_ids[:, None])
                 gt_masks_per_video[:, f_i, :h, :w] = targets_per_frame.gt_masks.tensor
+                
+                #Adding the Gt features = avg polling(features * masks) for each features[key] and then concat them
+                pooled_frame_features = []
+                # Get Gt masks for this frame: [N, H, W]
+                current_masks = targets_per_frame.gt_masks.tensor.float()
+                # Unsqueeze to [N, 1, H, W] for interpolation
+                current_masks = current_masks.unsqueeze(1)
+                #calculating for each key in features
+                for key in features.keys():
+                    #C = features[key].shape[1], N = _num_instance
+                    feat_map = features[key][0] #shape[C, H_feat, W_feat]
+                    target_size = feat_map.shape[-2:]
+                    #resize/downsample GT mask to feature map size
+                    resized_masks = F.interpolate(current_masks, size=target_size, mode='bilinear', align_corners=False)
+                    binary_masks = (resized_masks > 0).float() # shape [N, 1, H_feat, W_feat]
+                    masked_feat = feat_map.unsqueeze(0) * binary_masks # shape [N, C, H, W]
+                    sum_feat = masked_feat.sum(dim=(-2, -1)) # shape [N, C]
+                    mask_area = binary_masks.sum(dim=(-2, -1)) # shape [N, 1]
+                    mask_area = torch.clamp(mask_area, min=1e-6)#Avoid division by Zero
+                    avg_feat = sum_feat / mask_area #shape [N, C]
+                    pooled_frame_features.append(avg_feat)
+                gt_features_per_video[:, f_i, :] = torch.cat(pooled_frame_features, dim = 1) #shape [n, features_dim]
+
+
                 #Adding the Gt centers
                 centers = targets_per_frame.gt_centers 
                 gt_centers_per_video[:, f_i] = centers
@@ -384,6 +425,10 @@ class VideoMaskFormer_frame(nn.Module):
             #Adding the Gt centers
             gt_centers_per_video = gt_centers_per_video[valid_idx]
             gt_instances[-1].update({"centers": gt_centers_per_video})
+
+            #Adding the Gt features
+            gt_features_per_video = gt_features_per_video[valid_idx]
+            gt_instances[-1].update({"features": gt_features_per_video})
 
         return gt_instances
 

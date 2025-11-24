@@ -19,12 +19,12 @@ Registry for transformer module in MaskFormer.
 """
 
 
-def build_transformer_decoder(cfg, in_channels, mask_classification=True):
+def build_transformer_decoder(cfg, in_channels, features_dim, mask_classification=True):
     """
     Build a instance embedding branch from `cfg.MODEL.INS_EMBED_HEAD.NAME`.
     """
     name = cfg.MODEL.MASK_FORMER.TRANSFORMER_DECODER_NAME
-    return TRANSFORMER_DECODER_REGISTRY.get(name)(cfg, in_channels, mask_classification)
+    return TRANSFORMER_DECODER_REGISTRY.get(name)(cfg, in_channels, features_dim, mask_classification)
 
 
 @TRANSFORMER_DECODER_REGISTRY.register()

@@ -108,6 +108,7 @@ class MaskFormerHead(nn.Module):
             "transformer_predictor": build_transformer_decoder(
                 cfg,
                 transformer_predictor_in_channels,
+                features_dim = sum(v.channels for k, v in input_shape.items() if k in cfg.MODEL.SEM_SEG_HEAD.IN_FEATURES),
                 mask_classification=True,
             ),
         }

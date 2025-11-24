@@ -339,11 +339,11 @@ class VideoMultiScaleMaskedTransformerDecoder(nn.Module):
         self.mask_embed = MLP(hidden_dim, hidden_dim, mask_dim, 3)
 
     @classmethod
-    def from_config(cls, cfg, in_channels, mask_classification):
+    def from_config(cls, cfg, in_channels, features_dim, mask_classification):
         ret = {}
         ret["in_channels"] = in_channels
         ret["mask_classification"] = mask_classification
-        
+        ret["features_dim"] = features_dim
         ret["num_classes"] = cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES
         ret["hidden_dim"] = cfg.MODEL.MASK_FORMER.HIDDEN_DIM
         ret["num_queries"] = cfg.MODEL.MASK_FORMER.NUM_OBJECT_QUERIES

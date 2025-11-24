@@ -184,17 +184,27 @@ class VideoSetCriterion(nn.Module):
         del src_masks
         del target_masks
         return losses
+    #Adding the loss calculations for centers
     def loss_centers(self, outputs, targets, indices, num_masks):
         assert "pred_centers" in outputs
         pred = outputs["pred_centers"] #[B, Q, T, 2]
-        batch_idx, src_idx = self._get_src_permutation_idx(indices)
-        if batch_idx.numel() == 0:
-            return {"loss_center": pred.sum() * 0.0}
-        src_centers = pred[batch_idx, src_idx]
+        src_idx = self._get_src_permutation_idx(indices)
+        src_centers = pred[src_idx]
         tgt_centers = torch.cat([t["centers"][J] for t, (_, J) in zip(targets, indices)], dim=0).to(src_centers)
-        per_item = F.l1_loss(src_centers, tgt_centers, reduction="none").sum(-1).mean(-1)
+        per_item = F.mse_loss(src_centers, tgt_centers, reduction="none").sum(-1).mean(-1)
         loss_center = per_item.sum() / max(num_masks, 1.0)
         losses = {"loss_center": loss_center}
+        return losses
+    #Adding the loss calculations for features    
+    def loss_features(self, outputs, targets, indices, num_masks):
+        assert "pred_feats" in outputs
+        pred = outputs["pred_feats"]
+        src_idx = self._get_src_permutation_idx(indices)
+        src_feats = pred[src_idx]
+        tgt_centers = torch.cat([t["features"][J] for t, (_, J) in zip(targets, indices)], dim=0).to(src_feats)
+        per_item_loss = F.mse_loss(src_feats, tgt_centers, reduction="none").sum(-1).mean(-1)
+        loss_feat = per_item_loss.sum() / max(num_masks, 1.0)
+        losses = {"loss_feat": loss_feat}
         return losses
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
@@ -213,6 +223,7 @@ class VideoSetCriterion(nn.Module):
             'labels': self.loss_labels,
             'masks': self.loss_masks,
             'center': self.loss_centers,
+            'features': self.loss_features, 
         }
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)
