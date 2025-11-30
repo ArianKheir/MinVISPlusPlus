@@ -110,7 +110,7 @@ if __name__ == "__main__":
 		vid_frames.append(img)
 
 	start_time = time.time()
-	with autocast('cuda'):
+	with autocast():
 		predictions, visualized_output = demo.run_on_video(vid_frames)
 	logger.info(
 		"detected {} instances per frame in {:.2f}s".format(
@@ -122,4 +122,3 @@ if __name__ == "__main__":
 	for path, _vis_output in zip(frames_path, visualized_output):
 		out_filename = os.path.join(output_root, os.path.basename(path))
 		_vis_output.save(out_filename)
-

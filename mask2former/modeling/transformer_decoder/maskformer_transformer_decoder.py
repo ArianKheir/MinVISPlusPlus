@@ -18,7 +18,7 @@ TRANSFORMER_DECODER_REGISTRY.__doc__ = """
 Registry for transformer module in MaskFormer.
 """
 
-
+#passing th efeatures dim
 def build_transformer_decoder(cfg, in_channels, features_dim, mask_classification=True):
     """
     Build a instance embedding branch from `cfg.MODEL.INS_EMBED_HEAD.NAME`.

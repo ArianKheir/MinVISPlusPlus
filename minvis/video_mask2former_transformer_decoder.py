@@ -60,8 +60,9 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         N_steps = hidden_dim // 2
         self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
         ##Adding the MLP for predicting bbox centers
-        self.center_embed = MLP(hidden_dim, hidden_dim, 2, 3)
-
+        #for now changing it to linear for examinations
+        #self.center_embed = MLP(hidden_dim, hidden_dim, 2, 3)
+        self.center_embed = nn.Linear(hidden_dim, 2)
         ##Adding the MLP for predicting features 
         self.feat_embed = MLP(hidden_dim, hidden_dim, features_dim, 3)
 
@@ -92,12 +93,14 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
 
         predictions_class = []
         predictions_mask = []
+        #Arryas for center predictions and feature predictions
         predictions_center = []
         predictions_feat = []
         # prediction heads on learnable query features
         outputs_class, outputs_mask, attn_mask, output_center, output_feat = self.forward_prediction_heads(output, mask_features, attn_mask_target_size=size_list[0])
         predictions_class.append(outputs_class)
         predictions_mask.append(outputs_mask)
+        #Appending the output results for center and features
         predictions_center.append(output_center)
         predictions_feat.append(output_feat)
         for i in range(self.num_layers):
@@ -125,6 +128,7 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
             outputs_class, outputs_mask, attn_mask, output_center, output_feat = self.forward_prediction_heads(output, mask_features, attn_mask_target_size=size_list[(i + 1) % self.num_feature_levels])
             predictions_class.append(outputs_class)
             predictions_mask.append(outputs_mask)
+            #Appending the output results for center and features
             predictions_center.append(output_center)
             predictions_feat.append(output_feat)
 
@@ -140,10 +144,10 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
 
         for i in range(len(predictions_class)):
             predictions_class[i] = einops.rearrange(predictions_class[i], '(b t) q c -> b t q c', t=t)
-        
+        #changing the dimensions to make them suitable
         for i in range(len(predictions_center)):
             predictions_center[i] = einops.rearrange(predictions_center[i], '(b t) q c -> b q t c', t=t)
-        
+        #changing the dimensions to make them suitable
         for i in range(len(predictions_feat)):
             predictions_feat[i] = einops.rearrange(predictions_feat[i], '(b t) q c -> b q t c', t=t)
 
@@ -159,6 +163,7 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
                 predictions_class if self.mask_classification else None, predictions_mask, predictions_center, predictions_feat
             ),
             'pred_embds': pred_embds,
+            #returning the centers and features predicted
             'pred_centers': predictions_center[-1],
             'pred_feats': predictions_feat[-1]
         }
