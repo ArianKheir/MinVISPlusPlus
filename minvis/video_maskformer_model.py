@@ -407,11 +407,13 @@ class VideoMaskFormer_frame(nn.Module):
                 # Unsqueeze to [N, 1, H, W] for interpolation
                 current_masks = current_masks.unsqueeze(1)
                 #calculating for each key in features
-                for key in features.keys():
+                for key in self.pred_features:
                     #we customize the features we want to predict using pred_features
-                    if key in self.pred_features:
+                    if key in features.keys():
                         #C = features[key].shape[1], N = _num_instance
                         feat_map = features[key][0] #shape[C, H_feat, W_feat]
+                        #Detaching the feature map so the model wouldn't cheat with gradient descent on the backbone
+                        feat_map = feat_map.detach()
                         target_size = feat_map.shape[-2:]
                         #resize/downsample GT mask to feature map size
                         resized_masks = F.interpolate(current_masks, size=target_size, mode='bilinear', align_corners=False)
