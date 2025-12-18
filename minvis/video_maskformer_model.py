@@ -378,18 +378,20 @@ class VideoMaskFormer_frame(nn.Module):
     def prepare_targets(self, targets, images, features):
         h_pad, w_pad = images.tensor.shape[-2:]
         gt_instances = []
+        #Calculating the total feautre channles for features dim
+        features_dim = 0
+        for key in features.keys():
+            #we customize the features we want to predict using pred_features
+            if key in self.pred_features:
+                features_dim += features[key].shape[1]
+        #added batch support
+        frame_ptr = 0
         for targets_per_video in targets:
             _num_instance = len(targets_per_video["instances"][0])
             mask_shape = [_num_instance, self.num_frames, h_pad, w_pad]
             gt_masks_per_video = torch.zeros(mask_shape, dtype=torch.bool, device=self.device)
             #Adding the Gt centers
             gt_centers_per_video = torch.zeros((_num_instance, self.num_frames, 2), dtype=torch.float32, device=self.device)
-            #Calculating the total feautre channles for features dim
-            features_dim = 0
-            for key in features.keys():
-                #we customize the features we want to predict using pred_features
-                if key in self.pred_features:
-                    features_dim += features[key].shape[1]
             #Adding the Gt features
             gt_features_per_video = torch.zeros((_num_instance, self.num_frames, features_dim), dtype=torch.float32, device=self.device)
 
@@ -411,7 +413,7 @@ class VideoMaskFormer_frame(nn.Module):
                     #we customize the features we want to predict using pred_features
                     if key in features.keys():
                         #C = features[key].shape[1], N = _num_instance
-                        feat_map = features[key][0] #shape[C, H_feat, W_feat]
+                        feat_map = features[key][frame_ptr] #shape[C, H_feat, W_feat]
                         #Detaching the feature map so the model wouldn't cheat with gradient descent on the backbone
                         feat_map = feat_map.detach()
                         target_size = feat_map.shape[-2:]
@@ -425,6 +427,7 @@ class VideoMaskFormer_frame(nn.Module):
                         avg_feat = sum_feat / mask_area #shape [N, C]
                         pooled_frame_features.append(avg_feat)
                 gt_features_per_video[:, f_i, :] = torch.cat(pooled_frame_features, dim = 1) #shape [n, features_dim]
+                frame_ptr += 1
 
 
                 #Adding the Gt centers
