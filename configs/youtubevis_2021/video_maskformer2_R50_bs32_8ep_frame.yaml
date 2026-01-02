@@ -15,6 +15,7 @@ MODEL:
     IN_FEATURES: ["res2", "res3", "res4", "res5"]
     DEFORMABLE_TRANSFORMER_ENCODER_IN_FEATURES: ["res3", "res4", "res5"]
     PRED_FEATURES: ["res5"]
+    FEATURES_LOSS_TYPE: "Aligning"
     COMMON_STRIDE: 4
     TRANSFORMER_ENC_LAYERS: 6
   MASK_FORMER:

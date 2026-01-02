@@ -136,7 +136,15 @@ class VideoMaskFormer_frame(nn.Module):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
 
-        losses = ["labels", "masks", "center", "features"]
+        if cfg.MODEL.SEM_SEG_HEAD.FEATURES_LOSS_TYPE == "predicting":
+            losses = ["labels", "masks", "center", "features"]
+            aux_losses = ["labels", "masks", "center", "features"]
+        elif cfg.MODEL.SEM_SEG_HEAD.FEATURES_LOSS_TYPE == "Aligning":
+             losses = ["labels", "masks", "center", "featuresAlign"]
+             aux_losses= ["labels", "masks", "center"]
+        else:
+             losses = ["labels", "masks", "center"]
+             aux_losses = ["labels", "masks", "center"]
 
         criterion = VideoSetCriterion(
             sem_seg_head.num_classes,
@@ -144,6 +152,7 @@ class VideoMaskFormer_frame(nn.Module):
             weight_dict=weight_dict,
             eos_coef=no_object_weight,
             losses=losses,
+            aux_losses=aux_losses,  
             num_points=cfg.MODEL.MASK_FORMER.TRAIN_NUM_POINTS,
             oversample_ratio=cfg.MODEL.MASK_FORMER.OVERSAMPLE_RATIO,
             importance_sample_ratio=cfg.MODEL.MASK_FORMER.IMPORTANCE_SAMPLE_RATIO,
@@ -287,7 +296,7 @@ class VideoMaskFormer_frame(nn.Module):
                 #setting Targets for Centers and Features
                 if ('centers' in targets_per_video) and ('features' in targets_per_video):
                     centers = targets_per_video['centers'][:, f, :]
-                    features = targets_per_video['features'][:, f, :]
+                    features = targets_per_video['features'][:, [f], :]
                     gt_instances.append({"labels": labels, "ids": ids, "masks": masks, "centers": centers, "features":features})
                 else:
                     gt_instances.append({"labels": labels, "ids": ids, "masks": masks})

@@ -94,7 +94,7 @@ class VideoSetCriterion(nn.Module):
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
 
-    def __init__(self, num_classes, matcher, weight_dict, eos_coef, losses,
+    def __init__(self, num_classes, matcher, weight_dict, eos_coef, losses, aux_losses,
                  num_points, oversample_ratio, importance_sample_ratio):
         """Create the criterion.
         Parameters:
@@ -110,6 +110,7 @@ class VideoSetCriterion(nn.Module):
         self.weight_dict = weight_dict
         self.eos_coef = eos_coef
         self.losses = losses
+        self.aux_losses = aux_losses
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = self.eos_coef
         self.register_buffer("empty_weight", empty_weight)
@@ -209,6 +210,36 @@ class VideoSetCriterion(nn.Module):
         loss_feat = per_item_loss.sum() / max(num_masks, 1.0)
         losses = {"loss_features": loss_feat}
         return losses
+    def loss_featuresAlign(self, outputs, targets, indices, num_masks):
+        assert "pred_embds" in outputs
+        src_embeddings = outputs["pred_embds"] #[B, C, T, Q]
+        B, C, T, Q = src_embeddings.shape
+        loss_ahelele = torch.tensor(0.0, dtype=torch.float32, device=src_embeddings.device)
+        total_pairs = 0
+        for batch_idx, (src_idx, tgt_idx) in enumerate(indices):
+            if len(src_idx) < 2:
+                continue
+            q_matched = src_embeddings[batch_idx, :, :, src_idx] #[C, T, Q]
+            q_matched = q_matched.permute(2, 1, 0)  # [C, T, Q] -> [Q, T, C]
+            gt_feats_video = targets[batch_idx]["features"][tgt_idx] #[N, T, features_dim]
+            N_matched = q_matched.shape[0]
+            for t in range(T):
+                q_frame = q_matched[:, t, :] #[N, C]
+                g_frame = gt_feats_video[:, t, :] #[N, features_dim]
+                q_norm = F.normalize(q_frame, p=2, dim=1, eps=1e-8)
+                g_norm = F.normalize(g_frame, p=2, dim=1, eps=1e-8)
+                
+                sim_q = torch.mm(q_norm, q_norm.t())
+                sim_g = torch.mm(g_norm, g_norm.t())
+                triu_indices = torch.triu_indices(N_matched, N_matched, offset=1, device=sim_q.device)     
+                sim_q_triu = sim_q[triu_indices[0], triu_indices[1]]
+                sim_g_triu = sim_g[triu_indices[0], triu_indices[1]]
+                loss_ahelele += F.l1_loss(sim_q_triu, sim_g_triu, reduction='sum')
+                total_pairs += len(sim_g_triu)
+        if total_pairs > 0:
+            loss_ahelele = loss_ahelele / total_pairs
+        losses = {"loss_features": loss_ahelele}
+        return losses
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -227,6 +258,7 @@ class VideoSetCriterion(nn.Module):
             'masks': self.loss_masks,
             'center': self.loss_centers,
             'features': self.loss_features, 
+            'featuresAlign': self.loss_featuresAlign,
         }
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)

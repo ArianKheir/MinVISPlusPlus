@@ -39,6 +39,8 @@ def add_maskformer2_config(cfg):
     cfg.MODEL.MASK_FORMER.FEATURES_WEIGHT = 0.1 
     #config for the features we want to predict using the Queries
     cfg.MODEL.SEM_SEG_HEAD.PRED_FEATURES = ["res5"]
+    #config for selecting betwen different losses for features "predicting" for prediction and "Aligning" for the newer loss 
+    cfg.MODEL.SEM_SEG_HEAD.FEATURES_LOSS_TYPE = "Aligning"
     # transformer config
     cfg.MODEL.MASK_FORMER.NHEADS = 8
     cfg.MODEL.MASK_FORMER.DROPOUT = 0.1
