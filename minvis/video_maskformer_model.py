@@ -117,6 +117,7 @@ class VideoMaskFormer_frame(nn.Module):
         mask_weight = cfg.MODEL.MASK_FORMER.MASK_WEIGHT
         center_weight = cfg.MODEL.MASK_FORMER.CENTER_WEIGHT
         features_weight = cfg.MODEL.MASK_FORMER.FEATURES_WEIGHT
+        align_weight = cfg.MODEL.MASK_FORMER.ALIGN_WEIGHT
         #Which preds to predict
         pred_features = cfg.MODEL.SEM_SEG_HEAD.PRED_FEATURES
         # building criterion
@@ -127,8 +128,7 @@ class VideoMaskFormer_frame(nn.Module):
             num_points=cfg.MODEL.MASK_FORMER.TRAIN_NUM_POINTS,
         )
 
-        weight_dict = {"loss_ce": class_weight, "loss_mask": mask_weight, "loss_dice": dice_weight, "loss_center": center_weight, "loss_features" : features_weight}
-
+        weight_dict = {"loss_ce": class_weight, "loss_mask": mask_weight, "loss_dice": dice_weight, "loss_center": center_weight, "loss_features" : features_weight, "loss_ahleleleahle": align_weight}
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}
@@ -136,15 +136,8 @@ class VideoMaskFormer_frame(nn.Module):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
 
-        if cfg.MODEL.SEM_SEG_HEAD.FEATURES_LOSS_TYPE == "predicting":
-            losses = ["labels", "masks", "center", "features"]
-            aux_losses = ["labels", "masks", "center", "features"]
-        elif cfg.MODEL.SEM_SEG_HEAD.FEATURES_LOSS_TYPE == "Aligning":
-             losses = ["labels", "masks", "center", "featuresAlign"]
-             aux_losses= ["labels", "masks", "center"]
-        else:
-             losses = ["labels", "masks", "center"]
-             aux_losses = ["labels", "masks", "center"]
+        losses = ["labels", "masks", "center", "features", "ahleleleahle"]
+        aux_losses = ["labels", "masks", "center", "features"]
 
         criterion = VideoSetCriterion(
             sem_seg_head.num_classes,
@@ -265,6 +258,8 @@ class VideoMaskFormer_frame(nn.Module):
             outputs['pred_centers'] = einops.rearrange(outputs['pred_centers'], 'b q t c -> (b t) q c')
         if 'pred_feats' in outputs:
             outputs['pred_feats'] = einops.rearrange(outputs['pred_feats'], 'b q t c -> (b t) q c')
+        if 'pred_embds' in outputs:
+            outputs['pred_embds'] = einops.rearrange(outputs['pred_embds'], 'b c t q -> (b t) q c')
         if 'aux_outputs' in outputs:
             for i in range(len(outputs['aux_outputs'])):
                 outputs['aux_outputs'][i]['pred_masks'] = einops.rearrange(
@@ -296,7 +291,7 @@ class VideoMaskFormer_frame(nn.Module):
                 #setting Targets for Centers and Features
                 if ('centers' in targets_per_video) and ('features' in targets_per_video):
                     centers = targets_per_video['centers'][:, f, :]
-                    features = targets_per_video['features'][:, [f], :]
+                    features = targets_per_video['features'][:, f, :]
                     gt_instances.append({"labels": labels, "ids": ids, "masks": masks, "centers": centers, "features":features})
                 else:
                     gt_instances.append({"labels": labels, "ids": ids, "masks": masks})
@@ -462,19 +457,15 @@ class VideoMaskFormer_frame(nn.Module):
             gt_instances[-1].update({"features": gt_features_per_video})
 
         return gt_instances
-    #Added the pred_embeds for similarity checks
-    def inference_video(self, pred_cls, pred_masks, pred_embds,img_size, output_height, output_width, first_resize_size):
-        if pred_embds.dim() == 3:
-            pred_embds = pred_embds.mean(dim=1)
+    def inference_video(self, pred_cls, pred_masks, img_size, output_height, output_width, first_resize_size):
         if len(pred_cls) > 0:
             scores = F.softmax(pred_cls, dim=-1)[:, :-1]
             labels = torch.arange(self.sem_seg_head.num_classes, device=self.device).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
-            # keep top-10 predictions(maybe making this 10 customizable in future?)
+            # keep top-10 predictions
             scores_per_image, topk_indices = scores.flatten(0, 1).topk(10, sorted=False)
             labels_per_image = labels[topk_indices]
             topk_indices = topk_indices // self.sem_seg_head.num_classes
             pred_masks = pred_masks[topk_indices]
-            pred_embds = pred_embds[topk_indices]
 
             pred_masks = F.interpolate(
                 pred_masks, size=first_resize_size, mode="bilinear", align_corners=False
@@ -490,19 +481,16 @@ class VideoMaskFormer_frame(nn.Module):
             out_scores = scores_per_image.tolist()
             out_labels = labels_per_image.tolist()
             out_masks = [m for m in masks.cpu()]
-            out_embds = pred_embds.cpu()
         else:
             out_scores = []
             out_labels = []
             out_masks = []
-            out_embds = []
 
         video_output = {
             "image_size": (output_height, output_width),
             "pred_scores": out_scores,
             "pred_labels": out_labels,
             "pred_masks": out_masks,
-            "pred_embds": out_embds,
         }
 
         return video_output
