@@ -11,6 +11,32 @@ from torch.cuda.amp import autocast
 
 from detectron2.projects.point_rend.point_features import point_sample
 
+def loss_features(self, outputs, targets, indices, num_masks):
+    """Compute the feature matching loss"""
+    assert "pred_feats" in outputs, "pred_feats must be in outputs"
+    
+    pred = outputs["pred_feats"]  # [batch_size, num_queries, feat_dim]
+    
+    # Get matched predictions
+    src_idx = self._get_src_permutation_idx(indices)
+    src_feats = pred[src_idx]  # [total_matched, feat_dim]
+    
+    # Get matched targets
+    tgt_feats = torch.cat(
+        [t["features"][J] for t, (_, J) in zip(targets, indices)], 
+        dim=0
+    ).to(src_feats)  # [total_matched, feat_dim]
+    
+    # Normalize features
+    src_feats = F.normalize(src_feats, dim=-1, p=2)
+    tgt_feats = F.normalize(tgt_feats, dim=-1, p=2)
+    
+    # Compute L1 loss
+    per_item_loss = F.l1_Loss(src_feats, tgt_feats, reduction="none").mean(-1)
+    loss_features = per_item_loss.sum() / max(num_masks, 1.0)
+    
+    losses = {"loss_features": loss_features}
+    return losses
 
 def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
     """
@@ -74,8 +100,8 @@ class VideoHungarianMatcher(nn.Module):
     there are more predictions than targets. In this case, we do a 1-to-1 matching of the best predictions,
     while the others are un-matched (and thus treated as non-objects).
     """
-
-    def __init__(self, cost_class: float = 1, cost_mask: float = 1, cost_dice: float = 1, num_points: int = 0):
+    #added the feature loss for better matching
+    def __init__(self, cost_class: float = 1, cost_mask: float = 1, cost_dice: float = 1, cost_features: float = 1, num_points: int = 0):
         """Creates the matcher
 
         Params:
@@ -87,8 +113,8 @@ class VideoHungarianMatcher(nn.Module):
         self.cost_class = cost_class
         self.cost_mask = cost_mask
         self.cost_dice = cost_dice
-
-        assert cost_class != 0 or cost_mask != 0 or cost_dice != 0, "all costs cant be 0"
+        self.cost_features = cost_features
+        assert cost_class != 0 or cost_mask != 0 or cost_dice != 0 or cost_features != 0, "all costs cant be 0"
 
         self.num_points = num_points
 
@@ -140,11 +166,26 @@ class VideoHungarianMatcher(nn.Module):
                 # Compute the dice loss betwen masks
                 cost_dice = batch_dice_loss_jit(out_mask, tgt_mask)
             
+            #added the features cost for matching
+            cost_features = 0
+            if "pred_feats" in outputs and "features" in targets[b] and self.cost_features > 0:
+                out_feats = outputs["pred_feats"][b]  # [num_queries, feat_dim]
+                tgt_feats = targets[b]["features"].to(out_feats)  # [num_gts, feat_dim]
+                
+                # Normalize features
+                out_feats_norm = F.normalize(out_feats, dim=-1, p=2)
+                tgt_feats_norm = F.normalize(tgt_feats, dim=-1, p=2)
+                
+                # Compute pairwise L2 distance as cost
+                # Shape: [num_queries, num_gts]
+                cost_features = torch.cdist(out_feats_norm, tgt_feats_norm, p=2)
+            
             # Final cost matrix
             C = (
                 self.cost_mask * cost_mask
                 + self.cost_class * cost_class
                 + self.cost_dice * cost_dice
+                + self.cost_features * cost_features
             )
             C = C.reshape(num_queries, -1).cpu()
 
@@ -184,6 +225,7 @@ class VideoHungarianMatcher(nn.Module):
             "cost_class: {}".format(self.cost_class),
             "cost_mask: {}".format(self.cost_mask),
             "cost_dice: {}".format(self.cost_dice),
+            "cost_features: {}".format(self.cost_features),
         ]
         lines = [head] + [" " * _repr_indent + line for line in body]
         return "\n".join(lines)
