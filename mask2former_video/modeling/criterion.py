@@ -192,7 +192,7 @@ class VideoSetCriterion(nn.Module):
         src_idx = self._get_src_permutation_idx(indices)
         src_centers = pred[src_idx]
         tgt_centers = torch.cat([t["centers"][J] for t, (_, J) in zip(targets, indices)], dim=0).to(src_centers)
-        per_item = F.mse_loss(src_centers, tgt_centers, reduction="none").sum(-1).mean(-1)
+        per_item = F.l1_loss(src_centers, tgt_centers, reduction="none").sum(-1).mean(-1)
         loss_center = per_item.sum() / max(num_masks, 1.0)
         losses = {"loss_center": loss_center}
         return losses
@@ -206,7 +206,7 @@ class VideoSetCriterion(nn.Module):
         #added normalization
         src_feats = F.normalize(src_feats, dim=-1, p=2)
         tgt_feats = F.normalize(tgt_feats, dim=-1, p=2) 
-        per_item_loss = F.mse_loss(src_feats, tgt_feats, reduction="none").mean(-1)
+        per_item_loss = F.l1_loss(src_feats, tgt_feats, reduction="none").mean(-1)
         loss_features = per_item_loss.sum() / max(num_masks, 1.0)
         losses = {"loss_features": loss_features}
         return losses
