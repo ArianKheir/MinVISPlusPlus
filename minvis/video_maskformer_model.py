@@ -29,6 +29,40 @@ from scipy.optimize import linear_sum_assignment
 
 logger = logging.getLogger(__name__)
 
+#Memory Bank class
+class Memorybank(object):
+    def __init__(self, num_queries, hidden_dim, bank_size=3, device='cuda'):
+        self.bank_size = bank_size
+        self.num_queries = num_queries
+        self.size = 0
+        self.device = device
+
+        self.memory_bank = torch.zeros(self.bank_size, num_queries, hidden_dim).to(device)
+        self.scores = torch.zeros(self.bank_size, num_queries).to(device)
+
+    def reset(self):
+        self.memory_bank.zero_()
+        self.scores.zero_()
+        self.size = 0
+
+    def update(self, embeddings, max_scores):
+        '''
+        Args:
+            embeddings: (Q, C)
+        '''
+        self.memory_bank = self.memory_bank.roll(1, dims=0)
+        self.memory_bank[0] = embeddings
+        self.scores = self.scores.roll(1, dims=0)
+        self.scores[0] = max_scores
+        self.size = min(self.size + 1, self.bank_size)
+
+    def get(self):
+        temporal_weight = torch.arange(0, 1+1e-6, 1 / self.size, device=self.memory_bank.device)[1:]
+        score_weight = self.scores[:self.size]
+        weight = temporal_weight[:, None] + score_weight
+        temporal_embedding = (self.memory_bank[:self.size] * weight[..., None]).sum(0) / weight.sum(0)[:, None]
+
+        return temporal_embedding
 
 @META_ARCH_REGISTRY.register()
 class VideoMaskFormer_frame(nn.Module):
@@ -56,6 +90,8 @@ class VideoMaskFormer_frame(nn.Module):
         window_inference,
         #passing the pred_features 
         pred_features,
+        #for Memory Bank
+        hidden_dim,
     ):
         """
         Args:
@@ -102,6 +138,10 @@ class VideoMaskFormer_frame(nn.Module):
         self.num_frames = num_frames
         self.window_inference = window_inference
 
+        #making the memory bank
+        self.hidden_dim = hidden_dim
+        self.memory_bank = Memorybank(num_queries, hidden_dim=hidden_dim, bank_size=5, device=self.device)
+
     @classmethod
     def from_config(cls, cfg):
         backbone = build_backbone(cfg)
@@ -120,6 +160,8 @@ class VideoMaskFormer_frame(nn.Module):
         align_weight = cfg.MODEL.MASK_FORMER.ALIGN_WEIGHT
         #Which preds to predict
         pred_features = cfg.MODEL.SEM_SEG_HEAD.PRED_FEATURES
+        #the hidden_dim for memory bank
+        hidden_dim = cfg.MODEL.MASK_FORMER.HIDDEN_DIM
         # building criterion
         matcher = VideoHungarianMatcher(
             cost_class=class_weight,
@@ -169,6 +211,8 @@ class VideoMaskFormer_frame(nn.Module):
             "window_inference": cfg.MODEL.MASK_FORMER.TEST.WINDOW_INFERENCE,
             #returning it for use
             "pred_features": pred_features,
+            #returning hidden_dim for memory bank
+            "hidden_dim": hidden_dim,
         }
 
     @property
@@ -217,6 +261,7 @@ class VideoMaskFormer_frame(nn.Module):
         if self.training:
             # mask classification target
             #Added features to the target
+            # Training: no memory bank
             targets = self.prepare_targets(batched_inputs, images, features)
 
             outputs, targets = self.frame_decoder_loss_reshape(outputs, targets)
@@ -232,6 +277,7 @@ class VideoMaskFormer_frame(nn.Module):
                     losses.pop(k)
             return losses
         else:
+            #uses memory bank in post_processing
             outputs = self.post_processing(outputs)
 
             mask_cls_results = outputs["pred_logits"]
@@ -249,7 +295,7 @@ class VideoMaskFormer_frame(nn.Module):
             height = input_per_image.get("height", image_size[0])  # raw image size before data augmentation
             width = input_per_image.get("width", image_size[1])
             #Also returning the embed results
-            return retry_if_cuda_oom(self.inference_video)(mask_cls_result, mask_pred_result, embd_result, image_size, height, width, first_resize_size)
+            return retry_if_cuda_oom(self.inference_video)(mask_cls_result, mask_pred_result, image_size, height, width, first_resize_size)
 
     def frame_decoder_loss_reshape(self, outputs, targets):
         outputs['pred_masks'] = einops.rearrange(outputs['pred_masks'], 'b q t h w -> (b t) q () h w')
@@ -301,6 +347,7 @@ class VideoMaskFormer_frame(nn.Module):
 
     def match_from_embds(self, tgt_embds, cur_embds):
 
+        tgt_embds = tgt_embds.to(cur_embds.device)
         cur_embds = cur_embds / cur_embds.norm(dim=1)[:, None]
         tgt_embds = tgt_embds / tgt_embds.norm(dim=1)[:, None]
         cos_sim = torch.mm(cur_embds, tgt_embds.transpose(0,1))
@@ -316,6 +363,7 @@ class VideoMaskFormer_frame(nn.Module):
         return indices
 
     def post_processing(self, outputs):
+        self.memory_bank.reset()
         pred_logits, pred_masks, pred_embds = outputs['pred_logits'], outputs['pred_masks'], outputs['pred_embds']
 
         # pred_logits: 1 t q c
@@ -335,12 +383,31 @@ class VideoMaskFormer_frame(nn.Module):
         out_masks.append(pred_masks[0])
         out_embds.append(pred_embds[0])
 
+        #first frame in Memory Bank
+        max_scores, _ = torch.max(out_logits[-1].softmax(dim=-1)[:, :-1], dim=-1)
+        self.memory_bank.update(pred_embds[0], max_scores)
+
+        #without memory bank
+        # for i in range(1, len(pred_logits)):
+        #     indices = self.match_from_embds(out_embds[-1], pred_embds[i])
+
+        #     out_logits.append(pred_logits[i][indices, :])
+        #     out_masks.append(pred_masks[i][indices, :, :])
+        #     out_embds.append(pred_embds[i][indices, :])
+
+        #with Memory Bank
         for i in range(1, len(pred_logits)):
-            indices = self.match_from_embds(out_embds[-1], pred_embds[i])
+            tgt_embds = self.memory_bank.get()
+            indices = self.match_from_embds(tgt_embds, pred_embds[i])
 
             out_logits.append(pred_logits[i][indices, :])
             out_masks.append(pred_masks[i][indices, :, :])
             out_embds.append(pred_embds[i][indices, :])
+
+            # Calculate scores and update memory bank
+            max_scores, _ = torch.max(out_logits[-1].softmax(dim=-1)[:, :-1], dim=-1)
+            self.memory_bank.update(pred_embds[i][indices, :], max_scores)
+
 
         out_logits = sum(out_logits)/len(out_logits)
         out_masks = torch.stack(out_masks, dim=1)  # q h w -> q t h w
