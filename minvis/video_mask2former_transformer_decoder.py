@@ -65,8 +65,12 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         self.center_embed = nn.Linear(hidden_dim, 2)
         ##Adding the MLP for predicting features 
         self.feat_embed = MLP(hidden_dim, hidden_dim, features_dim, 3)
+        # Inference-only query propagation
+        self.propagate_queries = True
+        self.prop_alpha = 0.5
+        self.prop_threshold = 0.7
 
-    def forward(self, x, mask_features, mask = None):
+    def forward(self, x, mask_features, mask = None, prev_queries=None, prev_scores=None):
         # x is a list of multi-scale feature
         assert len(x) == self.num_feature_levels
         src = []
@@ -89,8 +93,14 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
 
         # QxNxC
         query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
-        output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1)
-
+        init_output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1)
+        if (self.propagate_queries and prev_queries is not None and prev_scores is not None):
+            gate    = (prev_scores > self.prop_threshold).float()       # [B, Q]
+            gate    = gate.transpose(0, 1).unsqueeze(-1)                 # [Q, B, 1]
+            blended = self.prop_alpha * prev_queries + (1.0 - self.prop_alpha) * init_output
+            output  = gate * blended + (1.0 - gate) * init_output
+        else:
+            output = init_output
         predictions_class = []
         predictions_mask = []
         #Arryas for center predictions and feature predictions
@@ -155,6 +165,7 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         pred_embds = einops.rearrange(pred_embds, 'q (b t) c -> b c t q', t=t)
 
         out = {
+            'final_queries': output.detach(),   # [Q, B*T, C], pre-decoder_norm
             'pred_logits': predictions_class[-1],
             'pred_masks': predictions_mask[-1],
             #added the centers here for loss

@@ -140,7 +140,7 @@ class VideoMaskFormer_frame(nn.Module):
 
         #making the memory bank
         self.hidden_dim = hidden_dim
-        self.memory_bank = Memorybank(num_queries, hidden_dim=hidden_dim, bank_size=5, device=self.device)
+        self.memory_bank = Memorybank(num_queries, hidden_dim=hidden_dim, bank_size=3, device=self.device)
 
     @classmethod
     def from_config(cls, cfg):
@@ -254,6 +254,8 @@ class VideoMaskFormer_frame(nn.Module):
 
         if not self.training and self.window_inference:
             outputs = self.run_window_inference(images.tensor)
+        elif not self.training:
+            outputs = self.run_window_inference_frame_By_frame(images.tensor)
         else:
             features = self.backbone(images.tensor)
             outputs = self.sem_seg_head(features)
@@ -446,6 +448,45 @@ class VideoMaskFormer_frame(nn.Module):
         outputs['pred_embds'] = torch.cat([x['pred_embds'] for x in out_list], dim=2).detach()
 
         return outputs
+    def run_window_inference_frame_By_frame(self, images_tensor, window_size=30):
+        T = len(images_tensor)
+        out_list = []
+        prev_queries = None   # [Q, 1, C]
+        prev_scores  = None   # [1, Q]
+
+        for t in range(T):
+            frame = images_tensor[t:t+1]
+            features = self.backbone(frame)
+
+            # Replicate MaskFormerHead internals so we can inject prev_* into the predictor
+            mask_features, _, multi_scale_features = self.sem_seg_head.pixel_decoder.forward_features(features)
+
+            out = self.sem_seg_head.predictor(
+                multi_scale_features, mask_features, mask=None,
+                prev_queries=prev_queries, prev_scores=prev_scores,
+            )
+
+            # Update propagation state for next frame
+            prev_queries = out['final_queries']                  # already detached
+            logits       = out['pred_logits']                    # [1, 1, Q, C+1]
+            scores       = F.softmax(logits, dim=-1)[..., :-1]
+            max_scores,_ = scores.max(dim=-1)                    # [1, 1, Q]
+            prev_scores  = max_scores.squeeze(1).detach()        # [1, Q]
+
+            # Free memory like the original did
+            for k in ('res2', 'res3', 'res4', 'res5'):
+                features.pop(k, None)
+            for j in range(len(out['aux_outputs'])):
+                out['aux_outputs'][j].pop('pred_masks',  None)
+                out['aux_outputs'][j].pop('pred_logits', None)
+            out_list.append(out)
+
+        outputs = {
+            'pred_logits': torch.cat([x['pred_logits'] for x in out_list], dim=1).detach(),
+            'pred_masks':  torch.cat([x['pred_masks']  for x in out_list], dim=2).detach(),
+            'pred_embds':  torch.cat([x['pred_embds']  for x in out_list], dim=2).detach(),
+        }
+        return outputs
 
     def prepare_targets(self, targets, images, features):
         h_pad, w_pad = images.tensor.shape[-2:]
@@ -530,7 +571,7 @@ class VideoMaskFormer_frame(nn.Module):
             scores = F.softmax(pred_cls, dim=-1)[:, :-1]
             labels = torch.arange(self.sem_seg_head.num_classes, device=self.device).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
             # keep top-10 predictions
-            scores_per_image, topk_indices = scores.flatten(0, 1).topk(10, sorted=False)
+            scores_per_image, topk_indices = scores.flatten(0, 1).topk(40, sorted=False)
             labels_per_image = labels[topk_indices]
             topk_indices = topk_indices // self.sem_seg_head.num_classes
             pred_masks = pred_masks[topk_indices]
@@ -562,80 +603,3 @@ class VideoMaskFormer_frame(nn.Module):
         }
 
         return video_output
-#inference with frame numbers for more robust checks in similarities
-#for using the demo_video/demo_ForSimilaritycheck.py first uncomment the code below and comment the code inference_video above
-    # def inference_video(self, pred_cls, pred_masks, pred_embds, img_size, output_height, output_width, first_resize_size):
-    #     # pred_embds shape: [Q, T, C] where T is number of frames
-        
-    #     if len(pred_cls) > 0:
-    #         scores = F.softmax(pred_cls, dim=-1)[:, :-1]  # [Q, C]
-    #         num_queries = scores.shape[0]
-    #         num_classes = scores.shape[1]
-            
-    #         # Get number of frames from embeddings
-    #         num_frames = pred_embds.shape[1] if pred_embds.dim() == 3 else 1
-            
-    #         # Select top-k QUERIES
-    #         scores_flat = scores.flatten(0, 1)
-    #         k = min(10, scores_flat.shape[0])
-    #         scores_per_query, topk_indices = scores_flat.topk(k, sorted=False)
-            
-    #         # Get labels and query indices
-    #         labels = torch.arange(num_classes, device=self.device).unsqueeze(0).repeat(num_queries, 1).flatten(0, 1)
-    #         labels_per_query = labels[topk_indices]
-    #         query_indices = topk_indices // num_classes  # [k]
-            
-    #         # Select masks for top-k queries: [k, T, H, W]
-    #         pred_masks_topk = pred_masks[query_indices]
-            
-    #         # Select embeddings for top-k queries: [k, T, C]
-    #         pred_embds_topk = pred_embds[query_indices]
-            
-    #         # Expand to get one entry per (query, frame) pair
-    #         scores_per_image = scores_per_query.unsqueeze(1).repeat(1, num_frames).flatten()  # [k*T]
-    #         labels_per_image = labels_per_query.unsqueeze(1).repeat(1, num_frames).flatten()  # [k*T]
-            
-    #         # Create frame IDs
-    #         frame_ids = torch.arange(num_frames, device=self.device).unsqueeze(0).repeat(k, 1).flatten()  # [k*T]
-            
-    #         # Flatten masks: [k, T, H, W] -> [k*T, 1, H, W]
-    #         pred_masks_flat = pred_masks_topk.reshape(k * num_frames, pred_masks_topk.shape[2], pred_masks_topk.shape[3])
-    #         pred_masks_flat = pred_masks_flat.unsqueeze(1)
-            
-    #         # Flatten embeddings: [k, T, C] -> [k*T, C]
-    #         pred_embds_flat = pred_embds_topk.reshape(k * num_frames, pred_embds_topk.shape[2])
-            
-    #         # Resize masks
-    #         pred_masks_flat = F.interpolate(
-    #             pred_masks_flat, size=first_resize_size, mode="bilinear", align_corners=False
-    #         )
-    #         pred_masks_flat = pred_masks_flat[:, :, : img_size[0], : img_size[1]]
-    #         pred_masks_flat = F.interpolate(
-    #             pred_masks_flat, size=(output_height, output_width), mode="bilinear", align_corners=False
-    #         )
-
-    #         masks = pred_masks_flat > 0.
-    #         masks = masks.squeeze(1)
-
-    #         out_scores = scores_per_image.tolist()
-    #         out_labels = labels_per_image.tolist()
-    #         out_masks = [m for m in masks.cpu()]
-    #         out_embds = pred_embds_flat.cpu()
-    #         out_frame_ids = frame_ids.tolist()
-    #     else:
-    #         out_scores = []
-    #         out_labels = []
-    #         out_masks = []
-    #         out_embds = []
-    #         out_frame_ids = []
-
-    #     video_output = {
-    #         "image_size": (output_height, output_width),
-    #         "pred_scores": out_scores,
-    #         "pred_labels": out_labels,
-    #         "pred_masks": out_masks,
-    #         "pred_embds": out_embds,
-    #         "frame_ids": out_frame_ids,  # Always include frame_ids
-    #     }
-
-    #     return video_output
