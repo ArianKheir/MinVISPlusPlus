@@ -68,7 +68,7 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         # Inference-only query propagation
         self.propagate_queries = True
         self.prop_alpha = 0.5
-        self.prop_threshold = 0.7
+        self.prop_threshold = 0.95
 
     def forward(self, x, mask_features, mask = None, prev_queries=None, prev_scores=None):
         # x is a list of multi-scale feature
@@ -162,10 +162,11 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
             predictions_feat[i] = einops.rearrange(predictions_feat[i], '(b t) q c -> b q t c', t=t)
 
         pred_embds = self.decoder_norm(output)
+        final_queries = pred_embds
         pred_embds = einops.rearrange(pred_embds, 'q (b t) c -> b c t q', t=t)
 
         out = {
-            'final_queries': output.detach(),   # [Q, B*T, C], pre-decoder_norm
+            'final_queries': final_queries.detach(),   # [Q, B*T, C]
             'pred_logits': predictions_class[-1],
             'pred_masks': predictions_mask[-1],
             #added the centers here for loss

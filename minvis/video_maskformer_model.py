@@ -453,18 +453,12 @@ class VideoMaskFormer_frame(nn.Module):
         out_list = []
         prev_queries = None   # [Q, 1, C]
         prev_scores  = None   # [1, Q]
-
         for t in range(T):
             frame = images_tensor[t:t+1]
             features = self.backbone(frame)
 
             # Replicate MaskFormerHead internals so we can inject prev_* into the predictor
-            mask_features, _, multi_scale_features = self.sem_seg_head.pixel_decoder.forward_features(features)
-
-            out = self.sem_seg_head.predictor(
-                multi_scale_features, mask_features, mask=None,
-                prev_queries=prev_queries, prev_scores=prev_scores,
-            )
+            out = self.sem_seg_head(features, mask=None, prev_queries=prev_queries, prev_scores=prev_scores)
 
             # Update propagation state for next frame
             prev_queries = out['final_queries']                  # already detached
@@ -569,9 +563,9 @@ class VideoMaskFormer_frame(nn.Module):
     def inference_video(self, pred_cls, pred_masks, img_size, output_height, output_width, first_resize_size):
         if len(pred_cls) > 0:
             scores = F.softmax(pred_cls, dim=-1)[:, :-1]
-            labels = torch.arange(self.sem_seg_head.num_classes, device=self.device).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
+            labels = torch.arange(self.sem_seg_head.num_classes, device=self.device).unsqueeze(0).repeat(len(pred_cls), 1).flatten(0, 1)
             # keep top-10 predictions
-            scores_per_image, topk_indices = scores.flatten(0, 1).topk(40, sorted=False)
+            scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.sem_seg_head.num_classes, sorted=False)
             labels_per_image = labels[topk_indices]
             topk_indices = topk_indices // self.sem_seg_head.num_classes
             pred_masks = pred_masks[topk_indices]
@@ -581,12 +575,20 @@ class VideoMaskFormer_frame(nn.Module):
             )
 
             pred_masks = pred_masks[:, :, : img_size[0], : img_size[1]]
+
+            interim_mask_soft = pred_masks.sigmoid()
+            interim_mask_hard = interim_mask_soft > 0.5
+
+            numerator   = (interim_mask_soft.flatten(1) * interim_mask_hard.flatten(1)).sum(1)
+            denominator = interim_mask_hard.flatten(1).sum(1)
+
             pred_masks = F.interpolate(
                 pred_masks, size=(output_height, output_width), mode="bilinear", align_corners=False
             )
 
             masks = pred_masks > 0.
 
+            scores_per_image *= (numerator / (denominator + 1e-6))
             out_scores = scores_per_image.tolist()
             out_labels = labels_per_image.tolist()
             out_masks = [m for m in masks.cpu()]
