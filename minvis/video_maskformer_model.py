@@ -507,12 +507,16 @@ class VideoMaskFormer_frame(nn.Module):
                 targets_per_frame = targets_per_frame.to(self.device)
                 h, w = targets_per_frame.image_size
                 gt_ids_per_video.append(targets_per_frame.gt_ids[:, None])
-                gt_masks_per_video[:, f_i, :h, :w] = targets_per_frame.gt_masks.tensor
+                if hasattr(targets_per_frame.gt_masks, "tensor"):
+                    raw_masks = targets_per_frame.gt_masks.tensor
+                else:
+                    raw_masks = targets_per_frame.gt_masks
+                gt_masks_per_video[:, f_i, :h, :w] = raw_masks
                 
                 #Adding the Gt features = avg polling(features * masks) for each features[key] and then concat them
                 pooled_frame_features = []
                 # Get Gt masks for this frame: [N, H, W]
-                current_masks = targets_per_frame.gt_masks.tensor.float()
+                current_masks = raw_masks.float()
                 # Unsqueeze to [N, 1, H, W] for interpolation
                 current_masks = current_masks.unsqueeze(1)
                 #calculating for each key in features
