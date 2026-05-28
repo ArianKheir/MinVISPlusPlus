@@ -232,8 +232,8 @@ class RandomCropClip(T.Augmentation):
 
             h = h0 * x + h1 * (1-x)
             w = w0 * x + w1 * (1-x)
-            h = np.round_(h).astype(np.int)
-            w = np.round_(w).astype(np.int)
+            h = np.round(h).astype(int)
+            w = np.round(w).astype(int)
 
             if self._rand_range() < 0.5:
                 h = h[::-1]
@@ -259,7 +259,7 @@ class RandomCropClip(T.Augmentation):
             ch, cw = self.crop_size
             return int(h * ch + 0.5), int(w * cw + 0.5)
         elif self.crop_type == "relative_range":
-            crop_size = np.asarray(self.crop_size, dtype=np.float32)
+            crop_size = np.asarray(self.crop_size, dtype=float32)
             ch, cw = crop_size + np.random.rand(2) * (1 - crop_size)
             return int(h * ch + 0.5), int(w * cw + 0.5)
         elif self.crop_type == "absolute":
