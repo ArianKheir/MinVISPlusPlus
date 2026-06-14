@@ -67,8 +67,8 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         self.feat_embed = MLP(hidden_dim, hidden_dim, features_dim, 3)
         # Inference-only query propagation
         self.propagate_queries = True
-        self.prop_alpha = 0.5
-        self.prop_threshold = 0.95
+        self.prop_alpha = 0.25
+        self.prop_threshold = 0.80
 
     def forward(self, x, mask_features, mask = None, prev_queries=None, prev_scores=None):
         # x is a list of multi-scale feature

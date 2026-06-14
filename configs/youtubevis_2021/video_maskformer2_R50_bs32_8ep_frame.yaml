@@ -1,6 +1,6 @@
 _BASE_: Base-YouTubeVIS-VideoInstanceSegmentation.yaml
 MODEL:
-  WEIGHTS: "/work/gn21/h62001/MinVISPlusPlus/datasets/model_final_3c8ec9.pkl"
+  WEIGHTS: "model_final_3c8ec9.pkl"
   META_ARCHITECTURE: "VideoMaskFormer_frame"
   SEM_SEG_HEAD:
     NAME: "MaskFormerHead"
@@ -55,6 +55,6 @@ SOLVER:
   IMS_PER_BATCH: 32
   CHECKPOINT_PERIOD: 5000
   STEPS: (45000,)
-  MAX_ITER: 60000
+  MAX_ITER: 80000
 INPUT:
   SAMPLING_FRAME_NUM: 1

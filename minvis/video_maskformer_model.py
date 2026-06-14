@@ -64,6 +64,89 @@ class Memorybank(object):
 
         return temporal_embedding
 
+class MemorybankPlus(object):
+    def __init__(self, num_queries, hidden_dim, bank_size=3, device='cuda'):
+        self.bank_size = bank_size
+        self.num_queries = num_queries
+        self.hidden_dim = hidden_dim
+        self.size = 0
+        self.device = device
+
+        self.memory_bank = torch.zeros(self.bank_size, num_queries, hidden_dim).to(device)
+        self.scores = torch.zeros(self.bank_size, num_queries).to(device)
+        
+        # Hyperparameters for Temporal Channel Modulation
+        self.gamma = 2.0  # Controls how aggressively we suppress noisy channels
+
+    def reset(self):
+        self.memory_bank.zero_()
+        self.scores.zero_()
+        self.size = 0
+
+    def update(self, embeddings, max_scores):
+        '''
+        Args:
+            embeddings: (Q, C)
+            max_scores: (Q,)
+        '''
+        self.memory_bank = self.memory_bank.roll(1, dims=0)
+        self.memory_bank[0] = embeddings
+        self.scores = self.scores.roll(1, dims=0)
+        self.scores[0] = max_scores
+        self.size = min(self.size + 1, self.bank_size)
+
+    @torch.no_grad()
+    def get(self):
+        if self.size == 0:
+            return torch.zeros(self.num_queries, self.hidden_dim).to(self.device)
+
+        # embds: (T, Q, C) | scores: (T, Q)
+        embds = self.memory_bank[:self.size]
+        scores = self.scores[:self.size]
+
+        # ====================================================================
+        # 1. Base Temporal Aggregation (Weighted by score & recency)
+        # ====================================================================
+        # More recent frames get a slight exponential boost
+        temporal_decay = torch.exp(-0.5 * torch.arange(self.size, device=self.device, dtype=torch.float32))
+        
+        # Combine recency with the actual object detection score
+        weights = temporal_decay[:, None] * scores  # (T, Q)
+        weights = weights / (weights.sum(dim=0, keepdim=True) + 1e-6) # Normalize to sum to 1 over Time
+
+        # Calculate the base weighted average embedding -> (Q, C)
+        agg_embds = (embds * weights.unsqueeze(-1)).sum(dim=0)
+
+        # If we don't have a history yet, just return the normalized embedding
+        if self.size == 1:
+            return F.normalize(agg_embds, p=2, dim=-1)
+
+        # ====================================================================
+        # 2. Channel-wise Reliability Modulation
+        # ====================================================================
+        # Calculate how much each frame deviates from the aggregated mean -> (T, Q, C)
+        diff = embds - agg_embds.unsqueeze(0)
+        
+        # Calculate the weighted temporal variance for every single channel -> (Q, C)
+        weighted_variance = (weights.unsqueeze(-1) * (diff ** 2)).sum(dim=0)
+        
+        # Normalize variance across channels so it's scale-invariant -> (Q, C)
+        var_max = weighted_variance.max(dim=-1, keepdim=True)[0] + 1e-6
+        normalized_variance = weighted_variance / var_max
+        
+        # Create the Reliability Mask -> (Q, C)
+        # High variance -> Approaches 0 (suppressed)
+        # Low variance -> Approaches 1 (amplified)
+        reliability_mask = torch.exp(-self.gamma * normalized_variance)
+        
+        # Apply the mask to reshape the latent space based on historical stability
+        final_embds = agg_embds * reliability_mask
+        
+        # Re-normalize for pure Cosine Similarity matching in match_from_embds
+        final_embds = F.normalize(final_embds, p=2, dim=-1)
+
+        return final_embds
+
 @META_ARCH_REGISTRY.register()
 class VideoMaskFormer_frame(nn.Module):
     """
@@ -140,7 +223,7 @@ class VideoMaskFormer_frame(nn.Module):
 
         #making the memory bank
         self.hidden_dim = hidden_dim
-        self.memory_bank = Memorybank(num_queries, hidden_dim=hidden_dim, bank_size=3, device=self.device)
+        self.memory_bank = MemorybankPlus(num_queries, hidden_dim=hidden_dim, bank_size=2, device=self.device)
 
     @classmethod
     def from_config(cls, cfg):
