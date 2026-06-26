@@ -1,13 +1,13 @@
-## Getting Started with MinVIS
+## Getting Started with queenvis
 
-This document provides a brief intro of the usage of MinVIS.
+This document provides a brief intro of the usage of queenvis.
 
 Please see [Getting Started with Detectron2](https://github.com/facebookresearch/detectron2/blob/master/GETTING_STARTED.md) for full usage.
 
 
 ### Training & Evaluation in Command Line
 
-We provide a script `train_net_video.py`, that is made to train all the configs provided in MinVIS.
+We provide a script `train_net_video.py`, that is made to train all the configs provided in queenvis.
 
 To train a model with "train_net_video.py", first setup the corresponding datasets following
 [datasets/README.md](./datasets/README.md), then download the COCO pre-trained instance segmentation weights ([R50](https://dl.fbaipublicfiles.com/maskformer/mask2former/coco/instance/maskformer2_R50_bs16_50ep/model_final_3c8ec9.pkl), [Swin-L](https://dl.fbaipublicfiles.com/maskformer/mask2former/coco/instance/maskformer2_swin_large_IN21k_384_bs16_100ep/model_final_e5f453.pkl)) and put them in the current working directory.

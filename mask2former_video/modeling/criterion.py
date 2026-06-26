@@ -213,7 +213,7 @@ class VideoSetCriterion(nn.Module):
     def loss_featuresAlign(self, outputs, targets, indices, num_masks):
         assert "pred_embds" in outputs
         src_embeddings = outputs["pred_embds"] #[(B*T), Q, C]
-        loss_ahleleleahle = torch.tensor(0.0, dtype=torch.float32, device=src_embeddings.device)
+        loss_align = torch.tensor(0.0, dtype=torch.float32, device=src_embeddings.device)
         total_pairs = 0
         for frame_idx, (src_idx, tgt_idx) in enumerate(indices):
             if len(src_idx) < 2:
@@ -232,11 +232,11 @@ class VideoSetCriterion(nn.Module):
             sim_q_triu = sim_q[triu_indices[0], triu_indices[1]]
             sim_g_triu = sim_g[triu_indices[0], triu_indices[1]]
             # Accumulate loss
-            loss_ahleleleahle += F.l1_loss(sim_q_triu, sim_g_triu, reduction='sum')
+            loss_align += F.l1_loss(sim_q_triu, sim_g_triu, reduction='sum')
             total_pairs += len(sim_g_triu)
         if total_pairs > 0:
-            loss_ahleleleahle = loss_ahleleleahle / total_pairs
-        losses = {"loss_ahleleleahle": loss_ahleleleahle}
+            loss_align = loss_align / total_pairs
+        losses = {"loss_align": loss_align}
         return losses
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
@@ -256,7 +256,7 @@ class VideoSetCriterion(nn.Module):
             'masks': self.loss_masks,
             'center': self.loss_centers,
             'features': self.loss_features, 
-            'ahleleleahle': self.loss_featuresAlign,
+            'align': self.loss_featuresAlign,
         }
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)

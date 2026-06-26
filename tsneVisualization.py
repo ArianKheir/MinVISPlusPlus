@@ -17,7 +17,7 @@ from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.structures import ImageList
 from train_net_video import setup
 
-def build_minvis_model(cfg_file, weights_path, device="cuda"):
+def build_queenvis_model(cfg_file, weights_path, device="cuda"):
     args = argparse.Namespace(
         config_file=cfg_file,
         opts=["MODEL.WEIGHTS", weights_path], 
@@ -210,7 +210,7 @@ def tsne_gt_anchored_queries(all_embds, all_gt_assignments, out_dir, perplexity=
     
     tsne = TSNE(
         n_components=2, 
-        metric="cosine",            # Matches the MinVIS temporal bipartite matching metric
+        metric="cosine",            # Matches the queenvis temporal bipartite matching metric
         perplexity=dynamic_perplexity, 
         learning_rate="auto", 
         init="random", 
@@ -253,7 +253,7 @@ def tsne_gt_anchored_queries(all_embds, all_gt_assignments, out_dir, perplexity=
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
     plt.tight_layout()
     
-    out_path = os.path.join(out_dir, "gt_matched_queries_tsne_minvis.png")
+    out_path = os.path.join(out_dir, "gt_matched_queries_tsne_queenvis.png")
     plt.savefig(out_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
     plt.close()
     print(f"Visualization saved to {out_path}")
@@ -271,7 +271,7 @@ def main():
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    cfg, model = build_minvis_model(args.config, args.weights, device=device)
+    cfg, model = build_queenvis_model(args.config, args.weights, device=device)
 
     print(f"Loading Ground Truth for video: {args.video}")
     image_paths, video_anns = get_video_data(args.ann_file, args.img_dir, args.video)

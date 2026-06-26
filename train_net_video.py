@@ -51,17 +51,17 @@ from detectron2.utils.logger import setup_logger
 # Models
 from mask2former import add_maskformer2_config
 from mask2former_video import add_maskformer2_video_config
-from minvis import (
+from queenvis import (
     YTVISDatasetMapper,
     YTVISEvaluator,
-    add_minvis_config,
+    add_queenvis_config,
     build_combined_loader,
     build_detection_train_loader,
     build_detection_test_loader,
     get_detection_dataset_dicts,
 )
 
-from minvis.data_video.dataset_mapper import CocoClipDatasetMapper
+from queenvis.data_video.dataset_mapper import CocoClipDatasetMapper
 
 class Trainer(DefaultTrainer):
     """
@@ -275,14 +275,14 @@ def setup(args):
     add_deeplab_config(cfg)
     add_maskformer2_config(cfg)
     add_maskformer2_video_config(cfg)
-    add_minvis_config(cfg)
+    add_queenvis_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     default_setup(cfg, args)
     # Setup logger for "mask_former" module
     setup_logger(name="mask2former")
-    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="minvis")
+    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="queenvis")
     return cfg
 
 

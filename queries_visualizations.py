@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from train_net_video import setup
 
-def build_minvis_model(cfg_file, weights_path, device="cuda"):
+def build_queenvis_model(cfg_file, weights_path, device="cuda"):
     args = argparse.Namespace(
         config_file=cfg_file,
         opts=["MODEL.WEIGHTS", weights_path],  # pass weights via opts
@@ -210,7 +210,7 @@ def main():
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    cfg, model = build_minvis_model(args.config, args.weights, device=device)
+    cfg, model = build_queenvis_model(args.config, args.weights, device=device)
 
     logits1, embds1 = forward_one_image(model, args.img1)
     logits2, embds2 = forward_one_image(model, args.img2)

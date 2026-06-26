@@ -27,8 +27,8 @@ TORCH_CUDA_ARCH_LIST='8.0' FORCE_CUDA=1 python setup.py build install
 
 ### Example conda environment setup
 ```bash
-conda create --name minvis python=3.8 -y
-conda activate minvis
+conda create --name queenvis python=3.8 -y
+conda activate queenvis
 conda install pytorch==1.9.0 torchvision==0.10.0 cudatoolkit=11.1 -c pytorch -c nvidia
 pip install -U opencv-python
 
@@ -40,8 +40,8 @@ pip install git+https://github.com/cocodataset/panopticapi.git
 pip install git+https://github.com/mcordts/cityscapesScripts.git
 
 cd ..
-git clone git@github.com:NVlabs/MinVIS.git
-cd MinVIS
+git clone git@github.com:NVlabs/queenvis.git
+cd queenvis
 pip install -r requirements.txt
 cd mask2former/modeling/pixel_decoder/ops
 sh make.sh

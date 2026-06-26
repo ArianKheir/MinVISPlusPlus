@@ -171,7 +171,7 @@ class VideoMaskFormer_frame(nn.Module):
             num_points=cfg.MODEL.MASK_FORMER.TRAIN_NUM_POINTS,
         )
 
-        weight_dict = {"loss_ce": class_weight, "loss_mask": mask_weight, "loss_dice": dice_weight, "loss_center": center_weight, "loss_features" : features_weight, "loss_ahleleleahle": align_weight}
+        weight_dict = {"loss_ce": class_weight, "loss_mask": mask_weight, "loss_dice": dice_weight, "loss_center": center_weight, "loss_features" : features_weight, "loss_align": align_weight}
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}
@@ -179,7 +179,7 @@ class VideoMaskFormer_frame(nn.Module):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
 
-        losses = ["labels", "masks", "center", "features", "ahleleleahle"]
+        losses = ["labels", "masks", "center", "features", "align"]
         aux_losses = ["labels", "masks", "center", "features"]
 
         criterion = VideoSetCriterion(

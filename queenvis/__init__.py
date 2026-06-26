@@ -7,7 +7,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 
 # config
-from .config import add_minvis_config
+from .config import add_queenvis_config
 
 # models
 from .video_maskformer_model import VideoMaskFormer_frame

@@ -1,7 +1,7 @@
 import os
 import json
 
-from minvis.data_video.datasets.ytvis import (
+from queenvis.data_video.datasets.ytvis import (
     COCO_TO_YTVIS_2019,
     COCO_TO_YTVIS_2021,
     COCO_TO_OVIS,
