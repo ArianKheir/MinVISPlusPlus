@@ -154,12 +154,14 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
 
         for i in range(len(predictions_class)):
             predictions_class[i] = einops.rearrange(predictions_class[i], '(b t) q c -> b t q c', t=t)
-        #changing the dimensions to make them suitable
-        for i in range(len(predictions_center)):
-            predictions_center[i] = einops.rearrange(predictions_center[i], '(b t) q c -> b q t c', t=t)
-        #changing the dimensions to make them suitable
-        for i in range(len(predictions_feat)):
-            predictions_feat[i] = einops.rearrange(predictions_feat[i], '(b t) q c -> b q t c', t=t)
+
+        if self.training:
+            #changing the dimensions to make them suitable
+            for i in range(len(predictions_center)):
+                predictions_center[i] = einops.rearrange(predictions_center[i], '(b t) q c -> b q t c', t=t)
+            #changing the dimensions to make them suitable
+            for i in range(len(predictions_feat)):
+                predictions_feat[i] = einops.rearrange(predictions_feat[i], '(b t) q c -> b q t c', t=t)
 
         pred_embds = self.decoder_norm(output)
         final_queries = pred_embds
@@ -175,10 +177,11 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
                 predictions_class if self.mask_classification else None, predictions_mask, predictions_center, predictions_feat
             ),
             'pred_embds': pred_embds,
-            #returning the centers and features predicted
-            'pred_centers': predictions_center[-1],
-            'pred_feats': predictions_feat[-1]
         }
+        if self.training:
+            # returning the centers and features predicted
+            out['pred_centers'] = predictions_center[-1]
+            out['pred_feats'] = predictions_feat[-1]
         
         return out
 
@@ -187,10 +190,14 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         decoder_output = decoder_output.transpose(0, 1)
         outputs_class = self.class_embed(decoder_output)
         mask_embed = self.mask_embed(decoder_output)
-        ##Adding bbox centers prediction-head in forward(AAded sigmoid for normalization)
-        output_center = torch.sigmoid(self.center_embed(decoder_output))
-        #Adding the features prediction-head in forward
-        output_feat = self.feat_embed(decoder_output)
+        if self.training:
+            ##Adding bbox centers prediction-head in forward(AAded sigmoid for normalization)
+            output_center = torch.sigmoid(self.center_embed(decoder_output))
+            #Adding the features prediction-head in forward
+            output_feat = self.feat_embed(decoder_output)
+        else:
+            output_center = None
+            output_feat = None
         outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
 
         # NOTE: prediction is of higher-resolution
@@ -204,14 +211,26 @@ class VideoMultiScaleMaskedTransformerDecoder_frame(VideoMultiScaleMaskedTransfo
         return outputs_class, outputs_mask, attn_mask, output_center, output_feat
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_seg_masks, outputs_centers, outputs_feats):
-        # keep TorchScript-friendly homogeneous dicts per layer
-        if self.mask_classification:
-            return [
-                {"pred_logits": a, "pred_masks": b, "pred_centers": c, "pred_feats": d}
-                for a, b, c, d in zip(outputs_class[:-1], outputs_seg_masks[:-1], outputs_centers[:-1], outputs_feats[:-1])
-            ]
+        if self.training:
+            # keep TorchScript-friendly homogeneous dicts per layer
+            if self.mask_classification:
+                return [
+                    {"pred_logits": a, "pred_masks": b, "pred_centers": c, "pred_feats": d}
+                    for a, b, c, d in zip(outputs_class[:-1], outputs_seg_masks[:-1], outputs_centers[:-1], outputs_feats[:-1])
+                ]
+            else:
+                return [
+                    {"pred_masks": b, "pred_centers": c, "pred_feats": d}
+                    for b, c, d in zip(outputs_seg_masks[:-1], outputs_centers[:-1], outputs_feats[:-1])
+                ]
         else:
-            return [
-                {"pred_masks": b, "pred_centers": c, "pred_feats": d}
-                for b, c, d in zip(outputs_seg_masks[:-1], outputs_centers[:-1], outputs_feats[:-1])
-            ]
+            if self.mask_classification:
+                return [
+                    {"pred_logits": a, "pred_masks": b}
+                    for a, b in zip(outputs_class[:-1], outputs_seg_masks[:-1])
+                ]
+            else:
+                return [
+                    {"pred_masks": b}
+                    for b in outputs_seg_masks[:-1]
+                ]
