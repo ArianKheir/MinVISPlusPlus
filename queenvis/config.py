@@ -9,12 +9,16 @@
 from detectron2.config import CfgNode as CN
 
 
-def add_minvis_config(cfg):
+def add_queenvis_config(cfg):
     cfg.DATASETS.DATASET_RATIO = []
     cfg.INPUT.SAMPLING_FRAME_RATIO = 1.0
     cfg.MODEL.MASK_FORMER.TEST.WINDOW_INFERENCE = False
+    cfg.MODEL.MASK_FORMER.PROPAGATE_QUERIES = True
+    cfg.MODEL.MASK_FORMER.PROP_ALPHA = 0.25
+    cfg.MODEL.MASK_FORMER.PROP_THRESHOLD = 0.80
+    cfg.MODEL.MASK_FORMER.MEMORY_BANK_SIZE = 3
 
-        # Pseudo Data Use
+    # Pseudo Data Use
     cfg.INPUT.PSEUDO = CN()
     cfg.INPUT.PSEUDO.AUGMENTATIONS = ['rotation']
     cfg.INPUT.PSEUDO.MIN_SIZE_TRAIN = (480, 512, 544, 576, 608, 640, 672, 704, 736, 768)

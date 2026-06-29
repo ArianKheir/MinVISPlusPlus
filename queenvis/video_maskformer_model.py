@@ -92,6 +92,8 @@ class VideoMaskFormer_frame(nn.Module):
         pred_features,
         #for Memory Bank
         hidden_dim,
+        #memory bank size for inference
+        memory_bank_size: int,
     ):
         """
         Args:
@@ -140,7 +142,7 @@ class VideoMaskFormer_frame(nn.Module):
 
         #making the memory bank
         self.hidden_dim = hidden_dim
-        self.memory_bank = Memorybank(num_queries, hidden_dim, bank_size=3, device=self.device)
+        self.memory_bank = Memorybank(num_queries, hidden_dim, bank_size=memory_bank_size, device=self.device)
 
     @classmethod
     def from_config(cls, cfg):
@@ -213,6 +215,8 @@ class VideoMaskFormer_frame(nn.Module):
             "pred_features": pred_features,
             #returning hidden_dim for memory bank
             "hidden_dim": hidden_dim,
+            #memory bank size for inference
+            "memory_bank_size": cfg.MODEL.MASK_FORMER.MEMORY_BANK_SIZE,
         }
 
     @property
