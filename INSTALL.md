@@ -1,8 +1,8 @@
 ## Installation
 
 ### Requirements
-- Linux or macOS with Python ≥ 3.6
-- PyTorch ≥ 1.9 and [torchvision](https://github.com/pytorch/vision/) that matches the PyTorch installation.
+- Linux or macOS with Python ≥ 3.10
+- PyTorch ≥ 2.6.0 and [torchvision](https://github.com/pytorch/vision/) that matches the PyTorch installation.
   Install them together at [pytorch.org](https://pytorch.org) to make sure of this. Note, please check
   PyTorch version matches that is required by Detectron2.
 - Detectron2: follow [Detectron2 installation instructions](https://detectron2.readthedocs.io/tutorials/install.html).
@@ -27,9 +27,9 @@ TORCH_CUDA_ARCH_LIST='8.0' FORCE_CUDA=1 python setup.py build install
 
 ### Example conda environment setup
 ```bash
-conda create --name queenvis python=3.8 -y
+conda create --name queenvis python=3.10 -y
 conda activate queenvis
-conda install pytorch==1.9.0 torchvision==0.10.0 cudatoolkit=11.1 -c pytorch -c nvidia
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu126
 pip install -U opencv-python
 
 # under your working directory
@@ -39,8 +39,6 @@ pip install -e .
 pip install git+https://github.com/cocodataset/panopticapi.git
 pip install git+https://github.com/mcordts/cityscapesScripts.git
 
-cd ..
-git clone git@github.com:NVlabs/queenvis.git
 cd queenvis
 pip install -r requirements.txt
 cd mask2former/modeling/pixel_decoder/ops

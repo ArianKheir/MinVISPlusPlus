@@ -345,6 +345,9 @@ class VideoMultiScaleMaskedTransformerDecoder(nn.Module):
         ret["mask_classification"] = mask_classification
         #adding the features_dim passed from calaculating from config
         ret["features_dim"] = features_dim
+        ret["propagate_queries"] = cfg.MODEL.MASK_FORMER.PROPAGATE_QUERIES
+        ret["prop_alpha"] = cfg.MODEL.MASK_FORMER.PROP_ALPHA
+        ret["prop_threshold"] = cfg.MODEL.MASK_FORMER.PROP_THRESHOLD
         ret["num_classes"] = cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES
         ret["hidden_dim"] = cfg.MODEL.MASK_FORMER.HIDDEN_DIM
         ret["num_queries"] = cfg.MODEL.MASK_FORMER.NUM_OBJECT_QUERIES
